@@ -57,10 +57,11 @@ class OIDCAuthenticationCallbackView(View):
         # using the SessionRefresh middleware.
         expiration_interval = self.get_settings('OIDC_RENEW_ID_TOKEN_EXPIRY_SECONDS', 60 * 15)
         self.request.session['oidc_id_token_expiration'] = time.time() + expiration_interval
+        self.request.session['oidc_client_key'] = self.kwargs.get('oidc_client_key', None)
 
         return HttpResponseRedirect(self.success_url)
 
-    def get(self, request):
+    def get(self, request, oidc_client_key=None):
         """Callback handler for OIDC authorization code flow"""
 
         if request.GET.get('error'):
@@ -111,6 +112,8 @@ class OIDCAuthenticationCallbackView(View):
                 'request': request,
                 'nonce': nonce,
             }
+            if oidc_client_key:
+                kwargs['oidc_client_key'] = oidc_client_key
 
             self.user = auth.authenticate(**kwargs)
 
@@ -164,12 +167,18 @@ class OIDCAuthenticationRequestView(View):
     def get_settings(attr, *args):
         return import_from_settings(attr, *args)
 
-    def get(self, request):
+    def get(self, request, oidc_client_key=None):
         """OIDC client authentication initialization HTTP endpoint"""
         state = get_random_string(self.get_settings('OIDC_STATE_SIZE', 32))
         redirect_field_name = self.get_settings('OIDC_REDIRECT_FIELD_NAME', 'next')
-        reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
-                                        'oidc_authentication_callback')
+        if oidc_client_key:
+            reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
+                                            'oidc_authentication_callback_multiple_clients')
+            reversed_url = reverse(reverse_url, kwargs={'oidc_client_key': oidc_client_key})
+        else:    
+            reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
+                                            'oidc_authentication_callback')
+            reversed_url = reverse(reverse_url)
 
         params = {
             'response_type': 'code',
@@ -177,7 +186,7 @@ class OIDCAuthenticationRequestView(View):
             'client_id': self.OIDC_RP_CLIENT_ID,
             'redirect_uri': absolutify(
                 request,
-                reverse(reverse_url)
+                reversed_url
             ),
             'state': state,
         }
@@ -195,7 +204,7 @@ class OIDCAuthenticationRequestView(View):
         request.session['oidc_login_next'] = get_next_url(request, redirect_field_name)
 
         query = urlencode(params)
-        redirect_url = '{url}?{query}'.format(url=self.OIDC_OP_AUTH_ENDPOINT, query=query)
+        redirect_url = '{url}?{query}'.format(url=self.OIDC_OP_AUTH_ENDPOINT % (oidc_client_key), query=query)
         return HttpResponseRedirect(redirect_url)
 
     def get_extra_params(self, request):

@@ -114,7 +114,7 @@ class SessionRefresh(MiddlewareMixin):
             request.method == 'GET' and
             request.user.is_authenticated and
             is_oidc_enabled and
-            request.path not in self.exempt_urls and
+            not any(url in request.path for url in self.exempt_urls) and
             not any(pat.match(request.path) for pat in self.exempt_url_patterns)
         )
 
@@ -124,6 +124,7 @@ class SessionRefresh(MiddlewareMixin):
             return
 
         expiration = request.session.get('oidc_id_token_expiration', 0)
+        oidc_client_key = request.session.get('oidc_client_key', None)
         now = time.time()
         if expiration > now:
             # The id_token is still valid, so we don't have to do anything.
@@ -132,18 +133,27 @@ class SessionRefresh(MiddlewareMixin):
 
         LOGGER.debug('id token has expired')
         # The id_token has expired, so we have to re-authenticate silently.
-        auth_url = self.OIDC_OP_AUTHORIZATION_ENDPOINT
-        client_id = self.OIDC_RP_CLIENT_ID
+        auth_url = self.get_settings('OIDC_OP_AUTHORIZATION_ENDPOINT') % (oidc_client_key)
+        client_id = self.get_settings('OIDC_RP_CLIENT_ID').get(oidc_client_key, None)
         state = get_random_string(self.OIDC_STATE_SIZE)
 
         # Build the parameters as if we were doing a real auth handoff, except
         # we also include prompt=none.
+        if oidc_client_key:
+            reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
+                                            'oidc_authentication_callback_multiple_clients')
+            reversed_url = reverse(reverse_url, kwargs={'oidc_client_key': oidc_client_key})
+        else:    
+            reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
+                                            'oidc_authentication_callback')
+            reversed_url = reverse(reverse_url)
+
         params = {
             'response_type': 'code',
             'client_id': client_id,
             'redirect_uri': absolutify(
                 request,
-                reverse(self.OIDC_AUTHENTICATION_CALLBACK_URL)
+                reversed_url
             ),
             'state': state,
             'scope': self.OIDC_RP_SCOPES,

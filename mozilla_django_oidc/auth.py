@@ -180,7 +180,7 @@ class OIDCAuthenticationBackend(ModelBackend):
         # By default fallback to verify JWT signatures
         return self._verify_jws(token, key)
 
-    def verify_token(self, token, **kwargs):
+    def verify_token(self, token, oidc_client_key=None, **kwargs):
         """Validate the token signature."""
         nonce = kwargs.get('nonce')
 
@@ -191,7 +191,7 @@ class OIDCAuthenticationBackend(ModelBackend):
             else:
                 key = self.retrieve_matching_jwk(token)
         else:
-            key = self.OIDC_RP_CLIENT_SECRET
+            key = self.OIDC_RP_CLIENT_SECRET.get(oidc_client_key, None)
 
         payload_data = self.get_payload_data(token, key)
 
@@ -210,7 +210,7 @@ class OIDCAuthenticationBackend(ModelBackend):
             raise SuspiciousOperation(msg)
         return payload
 
-    def get_token(self, payload):
+    def get_token(self, payload, oidc_client_key=None):
         """Return token object as a dictionary."""
 
         auth = None
@@ -223,7 +223,7 @@ class OIDCAuthenticationBackend(ModelBackend):
             del payload['client_secret']
 
         response = requests.post(
-            self.OIDC_OP_TOKEN_ENDPOINT,
+            self.OIDC_OP_TOKEN_ENDPOINT % (oidc_client_key),
             data=payload,
             auth=auth,
             verify=self.get_settings('OIDC_VERIFY_SSL', True),
@@ -232,12 +232,12 @@ class OIDCAuthenticationBackend(ModelBackend):
         response.raise_for_status()
         return response.json()
 
-    def get_userinfo(self, access_token, id_token, payload):
+    def get_userinfo(self, access_token, id_token, payload, oidc_client_key=None):
         """Return user details dictionary. The id_token and payload are not used in
         the default implementation, but may be used when overriding this method"""
 
         user_response = requests.get(
-            self.OIDC_OP_USER_ENDPOINT,
+            self.OIDC_OP_USER_ENDPOINT % (oidc_client_key),
             headers={
                 'Authorization': 'Bearer {0}'.format(access_token)
             },
@@ -261,22 +261,29 @@ class OIDCAuthenticationBackend(ModelBackend):
         if not code or not state:
             return None
 
-        reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
-                                        'oidc_authentication_callback')
+        oidc_client_key = kwargs.get('oidc_client_key', None)
+        if oidc_client_key:
+            reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
+                                            'oidc_authentication_callback_multiple_clients')
+            reversed_url = reverse(reverse_url, kwargs={'oidc_client_key': oidc_client_key})
+        else:    
+            reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
+                                            'oidc_authentication_callback')
+            reversed_url = reverse(reverse_url)
 
         token_payload = {
-            'client_id': self.OIDC_RP_CLIENT_ID,
-            'client_secret': self.OIDC_RP_CLIENT_SECRET,
+            'client_id': self.OIDC_RP_CLIENT_ID.get(oidc_client_key, None),
+            'client_secret': self.OIDC_RP_CLIENT_SECRET.get(oidc_client_key, None),
             'grant_type': 'authorization_code',
             'code': code,
             'redirect_uri': absolutify(
                 self.request,
-                reverse(reverse_url)
+                reversed_url
             ),
         }
 
         # Get the token
-        token_info = self.get_token(token_payload)
+        token_info = self.get_token(token_payload, oidc_client_key=oidc_client_key)
         id_token = token_info.get('id_token')
         access_token = token_info.get('access_token')
 
@@ -286,7 +293,7 @@ class OIDCAuthenticationBackend(ModelBackend):
         if payload:
             self.store_tokens(access_token, id_token)
             try:
-                return self.get_or_create_user(access_token, id_token, payload)
+                return self.get_or_create_user(access_token, id_token, payload, oidc_client_key=oidc_client_key)
             except SuspiciousOperation as exc:
                 LOGGER.warning('failed to get or create user: %s', exc)
                 return None
@@ -303,11 +310,11 @@ class OIDCAuthenticationBackend(ModelBackend):
         if self.get_settings('OIDC_STORE_ID_TOKEN', False):
             session['oidc_id_token'] = id_token
 
-    def get_or_create_user(self, access_token, id_token, payload):
+    def get_or_create_user(self, access_token, id_token, payload, oidc_client_key=None):
         """Returns a User instance if 1 user is found. Creates a user if not found
         and configured to do so. Returns nothing if multiple users are matched."""
 
-        user_info = self.get_userinfo(access_token, id_token, payload)
+        user_info = self.get_userinfo(access_token, id_token, payload, oidc_client_key)
 
         claims_verified = self.verify_claims(user_info)
         if not claims_verified:

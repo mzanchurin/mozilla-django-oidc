@@ -20,5 +20,9 @@ OIDCAuthenticateClass = import_string(AUTHENTICATE_CLASS_PATH)
 urlpatterns = [
     path('callback/', OIDCCallbackClass.as_view(), name='oidc_authentication_callback'),
     path('authenticate/', OIDCAuthenticateClass.as_view(), name='oidc_authentication_init'),
+    path('callback/(?P<oidc_client_key>.+)/$', OIDCCallbackClass.as_view(),
+        name='oidc_authentication_callback_multiple_clients'),
+    path('authenticate/(?P<oidc_client_key>.+)/$', OIDCAuthenticateClass.as_view(),
+        name='oidc_authentication_init_multiple_clients'),
     path('logout/', views.OIDCLogoutView.as_view(), name='oidc_logout'),
 ]
