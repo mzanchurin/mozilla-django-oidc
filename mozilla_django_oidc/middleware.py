@@ -133,8 +133,11 @@ class SessionRefresh(MiddlewareMixin):
 
         LOGGER.debug('id token has expired')
         # The id_token has expired, so we have to re-authenticate silently.
-        auth_url = self.get_settings('OIDC_OP_AUTHORIZATION_ENDPOINT') % (oidc_client_key)
-        client_id = self.get_settings('OIDC_RP_CLIENT_ID').get(oidc_client_key, None)
+        auth_url = self.get_settings('OIDC_OP_AUTHORIZATION_ENDPOINT').format(oidc_client_key)
+        client_id = self.get_settings('OIDC_RP_CLIENT_ID')
+        if type(client_id) is dict:
+            client_id = client_id.get(oidc_client_key, None)
+
         state = get_random_string(self.OIDC_STATE_SIZE)
 
         # Build the parameters as if we were doing a real auth handoff, except

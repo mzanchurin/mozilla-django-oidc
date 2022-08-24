@@ -191,7 +191,10 @@ class OIDCAuthenticationBackend(ModelBackend):
             else:
                 key = self.retrieve_matching_jwk(token)
         else:
-            key = self.OIDC_RP_CLIENT_SECRET.get(oidc_client_key, None)
+            if type(self.OIDC_RP_CLIENT_SECRET) is dict:
+                key = self.OIDC_RP_CLIENT_SECRET.get(oidc_client_key, None)
+            else:
+                key = self.OIDC_RP_CLIENT_SECRET
 
         payload_data = self.get_payload_data(token, key)
 
@@ -223,7 +226,7 @@ class OIDCAuthenticationBackend(ModelBackend):
             del payload['client_secret']
 
         response = requests.post(
-            self.OIDC_OP_TOKEN_ENDPOINT % (oidc_client_key),
+            self.OIDC_OP_TOKEN_ENDPOINT.format(oidc_client_key),
             data=payload,
             auth=auth,
             verify=self.get_settings('OIDC_VERIFY_SSL', True),
@@ -237,7 +240,7 @@ class OIDCAuthenticationBackend(ModelBackend):
         the default implementation, but may be used when overriding this method"""
 
         user_response = requests.get(
-            self.OIDC_OP_USER_ENDPOINT % (oidc_client_key),
+            self.OIDC_OP_USER_ENDPOINT.format(oidc_client_key),
             headers={
                 'Authorization': 'Bearer {0}'.format(access_token)
             },
@@ -271,9 +274,16 @@ class OIDCAuthenticationBackend(ModelBackend):
                                             'oidc_authentication_callback')
             reversed_url = reverse(reverse_url)
 
+        client_id = self.OIDC_RP_CLIENT_ID
+        client_secret = self.OIDC_RP_CLIENT_SECRET
+        if type(self.OIDC_RP_CLIENT_ID) is dict:
+            client_id = self.OIDC_RP_CLIENT_ID.get(oidc_client_key, None)
+        if type(self.OIDC_RP_CLIENT_SECRET) is dict:
+            client_secret = self.OIDC_RP_CLIENT_SECRET.get(oidc_client_key, None)
+
         token_payload = {
-            'client_id': self.OIDC_RP_CLIENT_ID.get(oidc_client_key, None),
-            'client_secret': self.OIDC_RP_CLIENT_SECRET.get(oidc_client_key, None),
+            'client_id': client_id,
+            'client_secret': client_secret,
             'grant_type': 'authorization_code',
             'code': code,
             'redirect_uri': absolutify(

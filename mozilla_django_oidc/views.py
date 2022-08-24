@@ -204,7 +204,7 @@ class OIDCAuthenticationRequestView(View):
         request.session['oidc_login_next'] = get_next_url(request, redirect_field_name)
 
         query = urlencode(params)
-        redirect_url = '{url}?{query}'.format(url=self.OIDC_OP_AUTH_ENDPOINT % (oidc_client_key), query=query)
+        redirect_url = '{url}?{query}'.format(url=self.OIDC_OP_AUTH_ENDPOINT.format(oidc_client_key), query=query)
         return HttpResponseRedirect(redirect_url)
 
     def get_extra_params(self, request):
